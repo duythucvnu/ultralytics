@@ -80,13 +80,10 @@ def bbox_iou(
     GIoU: bool = False,
     DIoU: bool = False,
     CIoU: bool = False,
-    SIoU: bool = False,  # Add the new SIoU flag
+    SIoU: bool = False,
     eps: float = 1e-7,
 ) -> torch.Tensor:
-    """
-    Calculate the Intersection over Union (IoU) between bounding boxes.
-    Supports IoU, GIoU, DIoU, CIoU, and the new SIoU.
-    """
+    
     # Get the coordinates of bounding boxes
     if xywh:  # transform from xywh to xyxy
         (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
@@ -98,6 +95,12 @@ def bbox_iou(
         b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
         w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps
         w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps
+        
+        # === PHẦN SỬA LỖI QUAN TRỌNG ===
+        # Tính toán tọa độ tâm x, y khi đầu vào là xyxy
+        x1, y1 = (b1_x1 + b1_x2) / 2, (b1_y1 + b1_y2) / 2
+        x2, y2 = (b2_x1 + b2_x2) / 2, (b2_y1 + b2_y2) / 2
+        # ================================
 
     # Intersection area
     inter = (b1_x2.minimum(b2_x2) - b1_x1.maximum(b2_x1)).clamp_(0) * \
@@ -110,57 +113,49 @@ def bbox_iou(
     iou = inter / union
 
     if GIoU or DIoU or CIoU or SIoU:
-        # Smallest enclosing box
-        cw = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)  # convex width
-        ch = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)  # convex height
-        if CIoU or DIoU or SIoU:
-            c2 = cw.pow(2) + ch.pow(2) + eps  # convex diagonal squared
-            # Center points distance squared
-            rho2 = ((b2_x1 + b2_x2 - b1_x1 - b1_x2).pow(2) +
-                    (b2_y1 + b2_y2 - b1_y1 - b1_y2).pow(2)) / 4
-            if SIoU:
-                # SIoU Loss https://arxiv.org/pdf/2205.12740.pdf
-                print("--- Đang sử dụng SIoU Loss! ---") 
-                # Center points
-                b1_cx, b1_cy = x1, y1
-                b2_cx, b2_cy = x2, y2
-                
-                # Angle Cost
-                s_cw = (b2_cx - b1_cx)
-                s_ch = (b2_cy - b1_cy)
-                sigma = (s_cw.pow(2) + s_ch.pow(2)).sqrt() + eps
-                sin_alpha_1 = (s_cw.abs() / sigma)
-                sin_alpha_2 = (s_ch.abs() / sigma)
-                threshold = pow(2, 0.5) / 2
-                sin_alpha = torch.where(sin_alpha_1 > threshold, sin_alpha_2, sin_alpha_1)
-                angle_cost = (1 - 2 * torch.sin(torch.arcsin(sin_alpha) - math.pi/4).pow(2))
+        cw = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)
+        ch = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)
+        if SIoU:
+            # SIoU Loss
+            # Center points (giờ đã an toàn để truy cập x1, y1, x2, y2)
+            b1_cx, b1_cy = x1, y1
+            b2_cx, b2_cy = x2, y2
+            
+            s_cw = (b2_cx - b1_cx)
+            s_ch = (b2_cy - b1_cy)
+            sigma = (s_cw.pow(2) + s_ch.pow(2)).sqrt() + eps
+            sin_alpha_1 = (s_cw.abs() / sigma)
+            sin_alpha_2 = (s_ch.abs() / sigma)
+            threshold = pow(2, 0.5) / 2
+            sin_alpha = torch.where(sin_alpha_1 > threshold, sin_alpha_2, sin_alpha_1)
+            angle_cost = (1 - 2 * torch.sin(torch.arcsin(sin_alpha) - math.pi / 4).pow(2))
 
-                # Distance Cost
-                dist_cost_x = 1 - torch.exp(-angle_cost * (s_cw / (cw + eps)).pow(2))
-                dist_cost_y = 1 - torch.exp(-angle_cost * (s_ch / (ch + eps)).pow(2))
-                dist_cost = dist_cost_x + dist_cost_y
+            dist_cost_x = 1 - torch.exp(-angle_cost * (s_cw / (cw + eps)).pow(2))
+            dist_cost_y = 1 - torch.exp(-angle_cost * (s_ch / (ch + eps)).pow(2))
+            dist_cost = dist_cost_x + dist_cost_y
 
-                # Shape Cost
-                omiga_w = (w1 - w2).abs() / (w1.maximum(w2))
-                omiga_h = (h1 - h2).abs() / (h1.maximum(h2))
-                shape_cost = (1 - torch.exp(-omiga_w)).pow(4) + \
-                             (1 - torch.exp(-omiga_h)).pow(4)
-                
-                # Note: The paper returns a loss, but this function must return an IoU value.
-                # Loss = 1 - iou + (dist_cost + shape_cost)/2
-                # So, IoU_value = iou - (dist_cost + shape_cost)/2
-                return iou - (dist_cost + shape_cost) / 2
+            omiga_w = (w1 - w2).abs() / (w1.maximum(w2))
+            omiga_h = (h1 - h2).abs() / (h1.maximum(h2))
+            shape_cost = (1 - torch.exp(-omiga_w)).pow(4) + \
+                         (1 - torch.exp(-omiga_h)).pow(4)
+            
+            return iou - (dist_cost + shape_cost) / 2
 
-            elif DIoU:
-                return iou - rho2 / c2  # DIoU
-            elif CIoU:
-                v = (4 / math.pi**2) * (torch.atan(w2 / h2) - torch.atan(w1 / h1)).pow(2)
-                with torch.no_grad():
-                    alpha = v / (v - iou + (1 + eps))
-                return iou - (rho2 / c2 + v * alpha)  # CIoU
-        else: # GIoU
-            c_area = cw * ch + eps  # convex area
-            return iou - (c_area - union) / c_area
+        c2 = cw.pow(2) + ch.pow(2) + eps
+        rho2 = ((x2 - x1).pow(2) + (y2 - y1).pow(2)) # Sử dụng trực tiếp x1, y1, x2, y2 đã tính toán
+        if DIoU:
+            return iou - rho2 / c2
+        elif CIoU:
+            v = (4 / math.pi**2) * (torch.atan(w2 / h2) - torch.atan(w1 / h1)).pow(2)
+            with torch.no_grad():
+                alpha = v / (v - iou + (1 + eps))
+            return iou - (rho2 / c2 + v * alpha)
+    
+    # Logic của GIoU nếu cần
+    if GIoU:
+        c_area = cw * ch + eps
+        return iou - (c_area - union) / c_area
+        
     return iou
 
 
