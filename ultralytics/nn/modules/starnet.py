@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 from timm.models.layers import DropPath, trunc_normal_
+# Import hàm tiện ích make_divisible từ ultralytics
+from ultralytics.utils.ops import make_divisible
 
 __all__ = ['starnet_s050', 'starnet_s100', 'starnet_s150', 'starnet_s1', 'starnet_s2', 'starnet_s3', 'starnet_s4']
 
@@ -25,10 +27,11 @@ class ConvBN(torch.nn.Sequential):
 class Block(nn.Module):
     def __init__(self, dim, mlp_ratio=3, drop_path=0.):
         super().__init__()
+        mlp_dim = make_divisible(mlp_ratio * dim, 8) # Đảm bảo mlp_dim chia hết cho 8
         self.dwconv = ConvBN(dim, dim, 7, 1, (7 - 1) // 2, groups=dim, with_bn=True)
-        self.f1 = ConvBN(dim, mlp_ratio * dim, 1, with_bn=False)
-        self.f2 = ConvBN(dim, mlp_ratio * dim, 1, with_bn=False)
-        self.g = ConvBN(mlp_ratio * dim, dim, 1, with_bn=True)
+        self.f1 = ConvBN(dim, mlp_dim, 1, with_bn=False)
+        self.f2 = ConvBN(dim, mlp_dim, 1, with_bn=False)
+        self.g = ConvBN(mlp_dim, dim, 1, with_bn=True)
         self.dwconv2 = ConvBN(dim, dim, 7, 1, (7 - 1) // 2, groups=dim, with_bn=False)
         self.act = nn.ReLU6()
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -44,12 +47,17 @@ class Block(nn.Module):
 
 
 class StarNet(nn.Module):
-    def __init__(self, base_dim=32, depths=[3, 3, 12, 5], mlp_ratio=4, ..., width_multiple=1.0):
+    # Thêm width_multiple vào __init__ với giá trị mặc định là 1.0 (không scale)
+    def __init__(self, base_dim=32, depths=[3, 3, 12, 5], mlp_ratio=4, drop_path_rate=0.0, num_classes=1000, width_multiple=1.0, **kwargs):
         super().__init__()
-        # Scale base_dim
-        base_dim = int(base_dim * width_multiple)
+        
+        # <<< THAY ĐỔI QUAN TRỌNG >>>
+        # Scale base_dim và in_channel dựa trên width_multiple
+        # làm tròn đến bội số gần nhất của 8 để tối ưu phần cứng
+        scaled_base_dim = make_divisible(base_dim * width_multiple, 8)
+        self.in_channel = make_divisible(32 * width_multiple, 8)
+        
         self.num_classes = num_classes
-        self.in_channel = 32
         # stem layer
         self.stem = nn.Sequential(ConvBN(3, self.in_channel, kernel_size=3, stride=2, padding=1), nn.ReLU6())
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))] # stochastic depth
@@ -57,86 +65,89 @@ class StarNet(nn.Module):
         self.stages = nn.ModuleList()
         cur = 0
         for i_layer in range(len(depths)):
-            embed_dim = base_dim * 2 ** i_layer
+            # Sử dụng scaled_base_dim đã được tính toán
+            embed_dim = make_divisible(scaled_base_dim * 2 ** i_layer, 8)
             down_sampler = ConvBN(self.in_channel, embed_dim, 3, 2, 1)
             self.in_channel = embed_dim
             blocks = [Block(self.in_channel, mlp_ratio, dpr[cur + i]) for i in range(depths[i_layer])]
             cur += depths[i_layer]
             self.stages.append(nn.Sequential(down_sampler, *blocks))
         
-        self.channel = [i.size(1) for i in self.forward(torch.randn(1, 3, 640, 640))]
+        # Xác định số kênh đầu ra P3, P4, P5
+        # forward mẫu để lấy shape, đảm bảo kích thước ảnh đủ lớn
+        dummy_input = torch.randn(1, 3, 640, 640)
+        # Lấy 3 feature map cuối cùng tương ứng P3, P4, P5
+        output_features = self.forward(dummy_input)
+        self.channel = [f.size(1) for f in output_features[-3:]]
+        
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
-        if isinstance(m, nn.Linear or nn.Conv2d):
+        if isinstance(m, (nn.Linear, nn.Conv2d)): # Sửa lại tuple
             trunc_normal_(m.weight, std=.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm or nn.BatchNorm2d):
+        elif isinstance(m, (nn.LayerNorm, nn.BatchNorm2d)): # Sửa lại tuple
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
     def forward(self, x):
         features = []
         x = self.stem(x)
-        features.append(x)
+        features.append(x) # P1
         for stage in self.stages:
             x = stage(x)
             features.append(x)
-        return features
+        # Trả về các feature map P2, P3, P4, P5
+        # (YOLOv8 head thường dùng P3, P4, P5)
+        return features[1:] # Bỏ qua P1, P2 (stem)
 
 
-
-def starnet_s1(pretrained=False, **kwargs):
-    model = StarNet(24, [2, 2, 8, 3], **kwargs)
-    if pretrained:
-        url = model_urls['starnet_s1']
-        checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
-        model.load_state_dict(checkpoint["state_dict"], strict=False)
+# Sửa lại các hàm khởi tạo để xử lý việc tải pretrained weights
+def _create_starnet(variant_name, base_dim, depths, mlp_ratio, pretrained=False, **kwargs):
+    """Hàm trợ giúp để tạo model và xử lý pretrained weights."""
+    # Lấy width_multiple từ kwargs, nếu không có thì mặc định là 1.0
+    width_multiple = kwargs.get('width_multiple', 1.0)
+    
+    # Tạo model và truyền tất cả kwargs vào
+    model = StarNet(base_dim, depths, mlp_ratio, **kwargs)
+    
+    # Chỉ tải pretrained weights nếu không scale và người dùng yêu cầu
+    if pretrained and width_multiple == 1.0:
+        if variant_name in model_urls:
+            url = model_urls[variant_name]
+            checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
+            # YOLOv8 thường dùng state_dict["model"], nhưng checkpoint này dùng "state_dict"
+            # nên cần kiểm tra và load cho đúng
+            state_dict = checkpoint.get("state_dict", checkpoint)
+            model.load_state_dict(state_dict, strict=False)
+            print(f"INFO: Loaded pretrained weights for {variant_name}")
+        else:
+            print(f"WARNING: No pretrained weights available for {variant_name}")
+    elif pretrained and width_multiple != 1.0:
+        print(f"INFO: Pretrained weights not loaded for {variant_name} because the model is scaled (width_multiple={width_multiple}).")
+        
     return model
 
-
+# Cập nhật các hàm khởi tạo model
+def starnet_s1(pretrained=False, **kwargs):
+    return _create_starnet('starnet_s1', 24, [2, 2, 8, 3], 4, pretrained, **kwargs)
 
 def starnet_s2(pretrained=False, **kwargs):
-    model = StarNet(32, [1, 2, 6, 2], **kwargs)
-    if pretrained:
-        url = model_urls['starnet_s2']
-        checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
-        model.load_state_dict(checkpoint["state_dict"], strict=False)
-    return model
-
-
+    return _create_starnet('starnet_s2', 32, [1, 2, 6, 2], 4, pretrained, **kwargs)
 
 def starnet_s3(pretrained=False, **kwargs):
-    model = StarNet(32, [2, 2, 8, 4], **kwargs)
-    if pretrained:
-        url = model_urls['starnet_s3']
-        checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
-        model.load_state_dict(checkpoint["state_dict"], strict=False)
-    return model
-
-
+    return _create_starnet('starnet_s3', 32, [2, 2, 8, 4], 4, pretrained, **kwargs)
 
 def starnet_s4(pretrained=False, **kwargs):
-    model = StarNet(32, [3, 3, 12, 5], **kwargs)
-    if pretrained:
-        url = model_urls['starnet_s4']
-        checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
-        model.load_state_dict(checkpoint["state_dict"], strict=False)
-    return model
+    return _create_starnet('starnet_s4', 32, [3, 3, 12, 5], 4, pretrained, **kwargs)
 
-
-# very small networks #
-
+# very small networks (không có pretrained weights nên giữ nguyên)
 def starnet_s050(pretrained=False, **kwargs):
     return StarNet(16, [1, 1, 3, 1], 3, **kwargs)
 
-
-
 def starnet_s100(pretrained=False, **kwargs):
     return StarNet(20, [1, 2, 4, 1], 4, **kwargs)
-
-
 
 def starnet_s150(pretrained=False, **kwargs):
     return StarNet(24, [1, 2, 4, 2], 3, **kwargs)
