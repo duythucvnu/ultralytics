@@ -1709,8 +1709,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             c2 = m.feature_info.channels()
         elif m in {starnet_s050, starnet_s100, starnet_s150, starnet_s1, starnet_s2, starnet_s3, starnet_s4
                    }:
-            args.append({'width_multiple': width})
-            m = m(*args)
+            m = m(*args, width_multiple=width) 
             c2 = m.channel
         else:
             c2 = ch[f]
