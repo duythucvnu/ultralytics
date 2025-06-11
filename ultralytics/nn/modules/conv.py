@@ -685,29 +685,24 @@ class Concat(nn.Module):
 class Index(nn.Module):
     """
     Returns a particular index of the input.
-
-    Attributes:
-        index (int): Index to select from input.
     """
-
     def __init__(self, index=0):
         """
         Initialize Index module.
-
         Args:
             index (int): Index to select from input.
         """
         super().__init__()
         self.index = index
 
-    def forward(self, x: List[torch.Tensor]):
+    def forward(self, x: list):
         """
-        Select and return a particular index from input.
-
+        Select and return a particular index from input list.
         Args:
-            x (List[torch.Tensor]): List of input tensors.
-
+            x (list): List of input tensors.
         Returns:
             (torch.Tensor): Selected tensor.
         """
         return x[self.index]
+
+
