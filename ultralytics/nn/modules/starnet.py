@@ -44,7 +44,8 @@ class Block(nn.Module):
 
 
 class StarNet(nn.Module):
-    def __init__(self, base_dim=32, depths=[3, 3, 12, 5], mlp_ratio=4, drop_path_rate=0.0, num_classes=1000, **kwargs):
+    def __init__(self, base_dim=32, depths=[3, 3, 12, 5], mlp_ratio=4, drop_path_rate=0.0, num_classes=1000,
+                 width_multiple=1.0, max_channels=float('inf'), **kwargs):
         super().__init__()
         self.num_classes = num_classes
         self.in_channel = 32
@@ -55,7 +56,8 @@ class StarNet(nn.Module):
         self.stages = nn.ModuleList()
         cur = 0
         for i_layer in range(len(depths)):
-            embed_dim = base_dim * 2 ** i_layer
+            unscaled_embed_dim = base_dim * 2 ** i_layer
+            embed_dim = make_divisible(min(unscaled_embed_dim, max_channels) * width_multiple, 8)
             down_sampler = ConvBN(self.in_channel, embed_dim, 3, 2, 1)
             self.in_channel = embed_dim
             blocks = [Block(self.in_channel, mlp_ratio, dpr[cur + i]) for i in range(depths[i_layer])]
