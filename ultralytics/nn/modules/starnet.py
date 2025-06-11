@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from timm.models.layers import DropPath, trunc_normal_
+from ultralytics.utils.ops import make_divisible
 
 __all__ = ['starnet_s050', 'starnet_s100', 'starnet_s150', 'starnet_s1', 'starnet_s2', 'starnet_s3', 'starnet_s4']
 
