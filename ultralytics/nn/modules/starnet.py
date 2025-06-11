@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from timm.models.layers import DropPath, trunc_normal_
-from ultralytics.utils.ops import make_divisible
 
 __all__ = ['starnet_s050', 'starnet_s100', 'starnet_s150', 'starnet_s1', 'starnet_s2', 'starnet_s3', 'starnet_s4']
 
@@ -45,9 +44,10 @@ class Block(nn.Module):
 
 
 class StarNet(nn.Module):
-    def __init__(self, base_dim=32, depths=[3, 3, 12, 5], mlp_ratio=4, drop_path_rate=0.0, num_classes=1000,
-                 width_multiple=1.0, max_channels=float('inf'), **kwargs):
+    def __init__(self, base_dim=32, depths=[3, 3, 12, 5], mlp_ratio=4, ..., width_multiple=1.0):
         super().__init__()
+        # Scale base_dim
+        base_dim = int(base_dim * width_multiple)
         self.num_classes = num_classes
         self.in_channel = 32
         # stem layer
@@ -57,8 +57,7 @@ class StarNet(nn.Module):
         self.stages = nn.ModuleList()
         cur = 0
         for i_layer in range(len(depths)):
-            unscaled_embed_dim = base_dim * 2 ** i_layer
-            embed_dim = make_divisible(min(unscaled_embed_dim, max_channels) * width_multiple, 8)
+            embed_dim = base_dim * 2 ** i_layer
             down_sampler = ConvBN(self.in_channel, embed_dim, 3, 2, 1)
             self.in_channel = embed_dim
             blocks = [Block(self.in_channel, mlp_ratio, dpr[cur + i]) for i in range(depths[i_layer])]
