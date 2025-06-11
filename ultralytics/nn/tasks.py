@@ -156,6 +156,7 @@ class BaseModel(torch.nn.Module):
             return self._predict_augment(x)
         return self._predict_once(x, profile, visualize, embed)
 
+
     def _predict_once(self, x, profile=False, visualize=False, embed=None):
         """
         Perform a forward pass through the network.
@@ -168,6 +169,10 @@ class BaseModel(torch.nn.Module):
             (torch.Tensor): The last output of the model.
         """
         y, dt, embeddings = [], [], []  # outputs
+        
+        # <<< THÊM DÒNG PRINT BAN ĐẦU >>>
+        print(f"Initial Input Shape: {x.shape}")
+        
         for idx, m in enumerate(self.model):
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
@@ -175,32 +180,40 @@ class BaseModel(torch.nn.Module):
                 self._profile_one_layer(m, x, dt)
             if hasattr(m, 'backbone'):
                 x = m(x)
-                for _ in range(5 - len(x)):
-                    x.insert(0, None)
+                # <<< THÊM PRINT CHO BACKBONE >>>
+                print(f"Layer {idx:>2} ({m.type}):")
+                for i, feature_map in enumerate(x):
+                    # In shape của từng feature map mà backbone trả về
+                    print(f"  - Output {i} shape: {feature_map.shape}")
+
+                # Gán lại x cho feature map cuối cùng để các layer sau có thể tiếp tục
+                x_for_next_layer = x[-1] 
+                # Lưu các kết quả vào y
                 for i_idx, i in enumerate(x):
-                    if i_idx in self.save:
+                    # Ultralytics dùng save list để quyết định lưu cái gì
+                    # logic này hơi phức tạp, ta tạm thời mô phỏng
+                    if (m.i + i_idx) in self.save: # Giả định m.i là index bắt đầu của backbone outputs
                         y.append(i)
                     else:
-                        y.append(None)
-                # print(f'layer id:{idx:>2} {m.type:>50} output shape:{", ".join([str(x_.size()) for x_ in x if x_ is not None])}')
-                x = x[-1]
+                        y.append(None) # Phải append None để giữ đúng index
+                x = x_for_next_layer # Cập nhật x để vòng lặp tiếp tục
             else:
+                # <<< THÊM PRINT CHO HEAD >>>
+                # In shape của input TRƯỚC khi vào module
+                if isinstance(x, list):
+                    print(f"Layer {idx:>2} ({m.type}) input shapes: {[item.shape if torch.is_tensor(item) else None for item in x]}")
+                else:
+                    print(f"Layer {idx:>2} ({m.type}) input shape: {x.shape}")
+
                 x = m(x)  # run
+                
+                # In shape của output SAU khi ra khỏi module
+                if isinstance(x, list):
+                     print(f"Layer {idx:>2} ({m.type}) output shapes: {[item.shape if torch.is_tensor(item) else None for item in x]}")
+                else:
+                     print(f"Layer {idx:>2} ({m.type}) output shape: {x.shape}\n")
+                
                 y.append(x if m.i in self.save else None)  # save output
-            
-            # if type(x) in {list, tuple}:
-            #     if idx == (len(self.model) - 1):
-            #         if type(x[1]) is dict:
-            #             print(f'layer id:{idx:>2} {m.type:>50} output shape:{", ".join([str(x_.size()) for x_ in x[1]["one2one"]])}')
-            #         else:
-            #             print(f'layer id:{idx:>2} {m.type:>50} output shape:{", ".join([str(x_.size()) for x_ in x[1]])}')
-            #     else:
-            #         print(f'layer id:{idx:>2} {m.type:>50} output shape:{", ".join([str(x_.size()) for x_ in x if x_ is not None])}')
-            # elif type(x) is dict:
-            #     print(f'layer id:{idx:>2} {m.type:>50} output shape:{", ".join([str(x_.size()) for x_ in x["one2one"]])}')
-            # else:
-            #     if not hasattr(m, 'backbone'):
-            #         print(f'layer id:{idx:>2} {m.type:>50} output shape:{x.size()}')
             
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
