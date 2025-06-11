@@ -4,7 +4,7 @@ from timm.models.layers import DropPath, trunc_normal_
 # Import hàm tiện ích make_divisible từ ultralytics
 from ultralytics.utils.ops import make_divisible
 
-__all__ = ['starnet_s050', 'starnet_s100', 'starnet_s150', 'starnet_s1', 'starnet_s2', 'starnet_s3', 'starnet_s4', 'Index']
+__all__ = ['starnet_s050', 'starnet_s100', 'starnet_s150', 'starnet_s1', 'starnet_s2', 'starnet_s3', 'starnet_s4']
 
 model_urls = {
     "starnet_s1": "https://github.com/ma-xu/Rewrite-the-Stars/releases/download/checkpoints_v1/starnet_s1.pth.tar",
@@ -12,29 +12,6 @@ model_urls = {
     "starnet_s3": "https://github.com/ma-xu/Rewrite-the-Stars/releases/download/checkpoints_v1/starnet_s3.pth.tar",
     "starnet_s4": "https://github.com/ma-xu/Rewrite-the-Stars/releases/download/checkpoints_v1/starnet_s4.pth.tar",
 }
-
-class Index(nn.Module):
-    """
-    Returns a particular index of the input.
-    """
-    def __init__(self, index=0):
-        """
-        Initialize Index module.
-        Args:
-            index (int): Index to select from input.
-        """
-        super().__init__()
-        self.index = index
-
-    def forward(self, x: list):
-        """
-        Select and return a particular index from input list.
-        Args:
-            x (list): List of input tensors.
-        Returns:
-            (torch.Tensor): Selected tensor.
-        """
-        return x[self.index]
 
 class ConvBN(torch.nn.Sequential):
     def __init__(self, in_planes, out_planes, kernel_size=1, stride=1, padding=0, dilation=1, groups=1, with_bn=True):
