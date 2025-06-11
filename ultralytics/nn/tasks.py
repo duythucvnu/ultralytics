@@ -1709,11 +1709,10 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             c2 = m.feature_info.channels()
         elif m in {starnet_s050, starnet_s100, starnet_s150, starnet_s1, starnet_s2, starnet_s3, starnet_s4
                    }:
-            m = m(*args)
+            m = m(*args, width_multiple=width, max_channels=max_channels)
             c2 = m.channel
         else:
             c2 = ch[f]
-
 
         if isinstance(c2, list):
             is_backbone = True
