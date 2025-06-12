@@ -52,8 +52,27 @@ __all__ = (
     "PSA",
     "SCDown",
     "TorchVision",
+    "SelectItem",
 )
 
+class SelectItem(nn.Module):
+    """Selects an item from a list of tensors output by a previous layer."""
+    def __init__(self, item_index):
+        super().__init__()
+        self.item_index = item_index
+
+    def forward(self, x_list):
+        """
+        Args:
+            x_list (list or tuple of torch.Tensor): The list of tensors from the previous layer.
+        Returns:
+            (torch.Tensor): The selected tensor.
+        """
+        if not isinstance(x_list, (list, tuple)):
+            raise TypeError(f"SelectItem expects a list or tuple of tensors, got {type(x_list)}")
+        if not (0 <= self.item_index < len(x_list)):
+            raise IndexError(f"SelectItem index {self.item_index} out of range for list of length {len(x_list)}")
+        return x_list[self.item_index]"
 
 class DFL(nn.Module):
     """
