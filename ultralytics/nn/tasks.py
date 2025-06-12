@@ -1647,6 +1647,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
     is_backbone = False
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
+        m_str = m
         try:
             if m == 'node_mode':
                 m = d[m]
@@ -1665,25 +1666,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                     except:
                         args[j] = a
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
-
-        if m is SelectItem:
-            item_idx_to_select = args[0]
-            source_channels_list = ch_history[f] # ch_history[f] should be a list from EfficientViT_YOLO
-            
-            if not isinstance(source_channels_list, list):
-                raise RuntimeError(
-                    f"SelectItem at layer {i} (from index {f}) expects ch_history[{f}] to be a list of channels, "
-                    f"but found type {type(source_channels_list)} with value {source_channels_list}."
-                )
-            if not (0 <= item_idx_to_select < len(source_channels_list)):
-                raise IndexError(
-                    f"SelectItem index {item_idx_to_select} out of range for source channel list "
-                    f"of length {len(source_channels_list)} from layer {f}."
-                )
-            
-            m_ = m(item_idx_to_select)
-            t = m_str # Use the string name from YAML for type
-            c2 = source_channels_list[item_idx_to_select] # c2 is an INT
+        
         if m in {
             Classify, Conv, ConvTranspose, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, Focus,
             BottleneckCSP, C1, C2, C2f, ELAN1, AConv, SPPELAN, C2fAttn, C3, C3TR,
@@ -1740,10 +1723,35 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             elif len(args) == 1:
                 m = timm.create_model(m, pretrained=args[0], features_only=True)
             c2 = m.feature_info.channels()
-        elif m in {starnet_s050, starnet_s100, starnet_s150, starnet_s1, starnet_s2, starnet_s3, starnet_s4
-                   }:
-            m = m(*args, width_multiple=width) 
-            c2 = m.channel
+        elif m in {starnet_s050, starnet_s100, starnet_s150, starnet_s1, starnet_s2, starnet_s3, starnet_s4}:
+            # Tạo instance của starnet, truyền width_multiple vào
+            m_ = m(*args, width_multiple=width)
+            t = m_str  # Sử dụng tên string từ YAML
+            # Lấy list các kênh đầu ra
+            c2 = m_.channel 
+        
+        # Xử lý SELECTITEM (Tương tự ví dụ của bạn)
+        elif m is SelectItem:
+            item_idx_to_select = args[0]
+            # Lấy list kênh từ layer nguồn
+            source_channels_list = ch_history[f] 
+            
+            if not isinstance(source_channels_list, list):
+                raise RuntimeError(
+                    f"SelectItem at layer {i} (from index {f}) expects ch_history[{f}] to be a list of channels, "
+                    f"but found type {type(source_channels_list)} with value {source_channels_list}."
+                )
+            # Cho phép index âm
+            if not (-len(source_channels_list) <= item_idx_to_select < len(source_channels_list)):
+                 raise IndexError(
+                    f"SelectItem index {item_idx_to_select} out of range for source channel list "
+                    f"of length {len(source_channels_list)} from layer {f}."
+                )
+            
+            m_ = m(item_idx_to_select)
+            t = m_str # Sử dụng tên string từ YAML
+            # Kênh đầu ra c2 bây giờ là một số nguyên
+            c2 = source_channels_list[item_idx_to_select]
         else:
             c2 = ch[f]
 
