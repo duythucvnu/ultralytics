@@ -1666,20 +1666,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                         args[j] = a
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
 
-        if m is EfficientViT_YOLO:
-            constructor_args = {}
-            if len(args) > 0: constructor_args['model_name'] = args[0]
-            if len(args) > 1: constructor_args['pretrained_path'] = args[1]
-            if len(args) > 2: constructor_args['img_size'] = args[2]
-            
-            initial_input_channels = ch_history[f] if isinstance(f, int) and f != -1 else ch_history[0]
-            constructor_args['in_chans'] = args[3] if len(args) > 3 else initial_input_channels
-            
-            m_ = m(**constructor_args)
-            t = m_str # Use the string name from YAML for type
-            c2 = m_._out_channels  # c2 is a LIST of channels for EfficientViT_YOLO
-
-        elif m is SelectItem:
+        if m is SelectItem:
             item_idx_to_select = args[0]
             source_channels_list = ch_history[f] # ch_history[f] should be a list from EfficientViT_YOLO
             
