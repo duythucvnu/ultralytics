@@ -93,13 +93,12 @@ class StarNet(nn.Module):
     def forward(self, x):
         features = []
         x = self.stem(x)
-        features.append(x) # P1
+        features.append(x) # P2/4
         for stage in self.stages:
             x = stage(x)
-            features.append(x)
-        # Trả về các feature map P2, P3, P4, P5
-        # (YOLOv8 head thường dùng P3, P4, P5)
-        return features[1:] # Bỏ qua P1, P2 (stem)
+            features.append(x) # P3, P4, P5
+        # Trả về P2, P3, P4, P5
+        return features # Bỏ qua P1, P2 (stem)
 
 
 # Sửa lại các hàm khởi tạo để xử lý việc tải pretrained weights
