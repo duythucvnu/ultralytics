@@ -1665,6 +1665,38 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                     except:
                         args[j] = a
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
+
+        if m is EfficientViT_YOLO:
+            constructor_args = {}
+            if len(args) > 0: constructor_args['model_name'] = args[0]
+            if len(args) > 1: constructor_args['pretrained_path'] = args[1]
+            if len(args) > 2: constructor_args['img_size'] = args[2]
+            
+            initial_input_channels = ch_history[f] if isinstance(f, int) and f != -1 else ch_history[0]
+            constructor_args['in_chans'] = args[3] if len(args) > 3 else initial_input_channels
+            
+            m_ = m(**constructor_args)
+            t = m_str # Use the string name from YAML for type
+            c2 = m_._out_channels  # c2 is a LIST of channels for EfficientViT_YOLO
+
+        elif m is SelectItem:
+            item_idx_to_select = args[0]
+            source_channels_list = ch_history[f] # ch_history[f] should be a list from EfficientViT_YOLO
+            
+            if not isinstance(source_channels_list, list):
+                raise RuntimeError(
+                    f"SelectItem at layer {i} (from index {f}) expects ch_history[{f}] to be a list of channels, "
+                    f"but found type {type(source_channels_list)} with value {source_channels_list}."
+                )
+            if not (0 <= item_idx_to_select < len(source_channels_list)):
+                raise IndexError(
+                    f"SelectItem index {item_idx_to_select} out of range for source channel list "
+                    f"of length {len(source_channels_list)} from layer {f}."
+                )
+            
+            m_ = m(item_idx_to_select)
+            t = m_str # Use the string name from YAML for type
+            c2 = source_channels_list[item_idx_to_select] # c2 is an INT
         if m in {
             Classify, Conv, ConvTranspose, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, Focus,
             BottleneckCSP, C1, C2, C2f, ELAN1, AConv, SPPELAN, C2fAttn, C3, C3TR,
